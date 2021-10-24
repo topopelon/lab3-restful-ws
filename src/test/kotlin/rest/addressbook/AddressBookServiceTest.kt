@@ -30,10 +30,21 @@ class AddressBookServiceTest {
 
     @Test
     fun serviceIsAlive() {
-        // Request the address book
-        val response = restTemplate.getForEntity("http://localhost:$port/contacts", Array<Person>::class.java)
-        assertEquals(200, response.statusCode.value())
-        assertEquals(0, response.body?.size)
+        // Check if [personList] is empty before GET request
+        assertEquals(0, addressBook.personList.size)
+        // Make GET request [n] times to make sure
+        val n = 1..2
+        for (i in n) {
+            val response = restTemplate.getForEntity(
+                "http://localhost:$port/contacts",
+                Array<Person>::class.java
+            )
+            assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
+            assertEquals(200, response.statusCode.value())
+            assertEquals(0, response.body?.size)
+        }
+        // Check if [personList] remains empty
+        assertEquals(0, addressBook.personList.size)
 
         //////////////////////////////////////////////////////////////////////
         // Verify that GET /contacts is well implemented by the service, i.e
