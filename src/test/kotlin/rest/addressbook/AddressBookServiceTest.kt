@@ -2,6 +2,7 @@ package rest.addressbook
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -9,9 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.*
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.web.server.LocalServerPort
-import org.springframework.http.HttpEntity
-import org.springframework.http.HttpMethod
-import org.springframework.http.MediaType
+import org.springframework.http.*
 import java.net.URI
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
@@ -33,8 +32,7 @@ class AddressBookServiceTest {
         // Check if [personList] is empty before GET request
         assertEquals(0, addressBook.personList.size)
         // Make GET request [n] times to make sure
-        val n = 1..2
-        for (i in n) {
+        (1..3).forEach { _ ->
             val response = restTemplate.getForEntity(
                 "http://localhost:$port/contacts",
                 Array<Person>::class.java
@@ -42,6 +40,7 @@ class AddressBookServiceTest {
             assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
             assertEquals(200, response.statusCode.value())
             assertEquals(0, response.body?.size)
+            assertEquals(0, addressBook.personList.size)
         }
         // Check if [personList] remains empty
         assertEquals(0, addressBook.personList.size)
@@ -54,31 +53,28 @@ class AddressBookServiceTest {
 
     @Test
     fun createUser() {
-
+        // Check if [personList] is empty before GET request
+        assertEquals(0, addressBook.personList.size)
         // Prepare data
         val juan = Person(name = "Juan")
-        val juanURI: URI = URI.create("http://localhost:$port/contacts/person/1")
+        // Every loop information is different
+        val n = (1..3)
+        n.forEach { i ->
+            // POST [juan] [n] times
+            var response = restTemplate.postForEntity(
+                "http://localhost:$port/contacts", juan, Person::class.java
+            )
+            // Check person has been created
+            val juanURI: URI = URI.create("http://localhost:$port/contacts/person/$i")
+            assertEquals(juanURI, response.headers.location)
+            assertPerson(response, juan, i, HttpStatus.CREATED)
+            // Check that the new user exists
+            response = restTemplate.getForEntity(juanURI, Person::class.java)
+            assertPerson(response, juan, i, HttpStatus.OK)
+            assertEquals(i, addressBook.personList.size)
+        }
 
-        // Create a new user
-        var response = restTemplate.postForEntity("http://localhost:$port/contacts", juan, Person::class.java)
-
-        assertEquals(201, response.statusCode.value())
-        assertEquals(juanURI, response.headers.location)
-        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
-        var juanUpdated = response.body
-        assertEquals(juan.name, juanUpdated?.name)
-        assertEquals(1, juanUpdated?.id)
-        assertEquals(juanURI, juanUpdated?.href)
-
-        // Check that the new user exists
-        response = restTemplate.getForEntity(juanURI, Person::class.java)
-
-        assertEquals(200, response.statusCode.value())
-        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
-        juanUpdated = response.body
-        assertEquals(juan.name, juanUpdated?.name)
-        assertEquals(1, juanUpdated?.id)
-        assertEquals(juanURI, juanUpdated?.href)
+        assertEquals(n.toList().size, addressBook.personList.size)
 
         //////////////////////////////////////////////////////////////////////
         // Verify that POST /contacts is well implemented by the service, i.e
@@ -93,36 +89,37 @@ class AddressBookServiceTest {
         addressBook.personList.add(salvador)
 
         // Prepare data
-        val juan = Person(name = "Juan")
-        val juanURI = URI.create("http://localhost:$port/contacts/person/2")
-        val maria = Person(name = "Maria")
-        val mariaURI = URI.create("http://localhost:$port/contacts/person/3")
+        val people = List(4) {
+            Person(name = "Juan");
+            Person(name = "Pedro");
+            Person(name = "Maria");
+            Person(name = "Carmen")
+        }
+        // Loop
+        people.forEachIndexed { i, person ->
+            val personURI = URI.create(
+                "http://localhost:$port/contacts/person/${i + 2}"
+            )
+            // Create user
+            var response =
+                restTemplate.postForEntity(
+                    "http://localhost:$port/contacts",
+                    person,
+                    Person::class.java
+                )
+            // Check person has been created
+            assertEquals(personURI, response.headers.location)
+            assertPerson(response, person, i + 2, HttpStatus.CREATED)
+            // Check that the new user exists
+            (1..3).forEach { _ ->
+                response = restTemplate.getForEntity(personURI, Person::class.java)
+                assertPerson(response, person, i + 2, HttpStatus.OK)
+                assertEquals(i + 2, addressBook.personList.size)
+            }
+        }
 
-        // Create a new user
-        var response = restTemplate.postForEntity("http://localhost:$port/contacts", juan, Person::class.java)
-        assertEquals(201, response.statusCode.value())
-        assertEquals(juanURI, response.headers.location)
-
-        // Create a second user
-        response = restTemplate.postForEntity("http://localhost:$port/contacts", maria, Person::class.java)
-        assertEquals(201, response.statusCode.value())
-        assertEquals(mariaURI, response.headers.location)
-        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
-
-        var mariaUpdated = response.body
-        assertEquals(maria.name, mariaUpdated?.name)
-        assertEquals(3, mariaUpdated?.id)
-        assertEquals(mariaURI, mariaUpdated?.href)
-
-        // Check that the new user exists
-        response = restTemplate.getForEntity(mariaURI, Person::class.java)
-
-        assertEquals(200, response.statusCode.value())
-        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
-        mariaUpdated = response.body
-        assertEquals(maria.name, mariaUpdated?.name)
-        assertEquals(3, mariaUpdated?.id)
-        assertEquals(mariaURI, mariaUpdated?.href)
+        // Check if [personList] is [people] size
+        assertEquals(people.size + 1, addressBook.personList.size)
 
         //////////////////////////////////////////////////////////////////////
         // Verify that GET /contacts/person/3 is well implemented by the service, i.e
@@ -134,17 +131,25 @@ class AddressBookServiceTest {
     fun listUsers() {
 
         // Prepare server
-        val salvador = Person(name = "Salvador", id = addressBook.nextId())
-        val juan = Person(name = "Juan", id = addressBook.nextId())
-        addressBook.personList.add(salvador)
-        addressBook.personList.add(juan)
+        val people = List(4) {
+            Person(name = "Juan", id = addressBook.nextId());
+            Person(name = "Pedro", id = addressBook.nextId());
+            Person(name = "Maria", id = addressBook.nextId());
+            Person(name = "Carmen", id = addressBook.nextId())
+        }
+        people.forEach { person ->
+            addressBook.personList.add(person)
+        }
 
         // Test list of contacts
-        val response = restTemplate.getForEntity("http://localhost:$port/contacts", Array<Person>::class.java)
-        assertEquals(200, response.statusCode.value())
-        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
-        assertEquals(2, response.body?.size)
-        assertEquals(juan.name, response.body?.get(1)?.name)
+        val response =
+            restTemplate.getForEntity("http://localhost:$port/contacts", Array<Person>::class.java)
+        people.forEachIndexed { i, person ->
+            assertEquals(200, response.statusCode.value())
+            assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
+            assertEquals(people.size, response.body?.size)
+            assertEquals(person.name, response.body?.get(i)?.name)
+        }
 
         //////////////////////////////////////////////////////////////////////
         // Verify that GET /contacts is well implemented by the service, i.e
@@ -164,7 +169,8 @@ class AddressBookServiceTest {
         // Update Maria
         val maria = Person(name = "Maria")
 
-        var response = restTemplate.exchange(juanURI, HttpMethod.PUT, HttpEntity(maria), Person::class.java)
+        var response =
+            restTemplate.exchange(juanURI, HttpMethod.PUT, HttpEntity(maria), Person::class.java)
         assertEquals(204, response.statusCode.value())
 
         // Verify that the update is real
@@ -201,10 +207,18 @@ class AddressBookServiceTest {
         addressBook.personList.add(juan)
 
         // Delete a user
-        restTemplate.execute(juanURI, HttpMethod.DELETE, {}, { assertEquals(204, it.statusCode.value()) })
+        restTemplate.execute(
+            juanURI,
+            HttpMethod.DELETE,
+            {},
+            { assertEquals(204, it.statusCode.value()) })
 
         // Verify that the user has been deleted
-        restTemplate.execute(juanURI, HttpMethod.GET, {}, { assertEquals(404, it.statusCode.value()) })
+        restTemplate.execute(
+            juanURI,
+            HttpMethod.GET,
+            {},
+            { assertEquals(404, it.statusCode.value()) })
 
         //////////////////////////////////////////////////////////////////////
         // Verify that DELETE /contacts/person/2 is well implemented by the service, i.e
@@ -241,7 +255,28 @@ class AddressBookServiceTest {
         assertEquals(juan.href, person?.href)
 
         // Test user 3 doesn't exist
-        restTemplate.execute("http://localhost:$port/contacts/person/3", HttpMethod.GET, {}, { assertEquals(404, it.statusCode.value()) })
+        restTemplate.execute(
+            "http://localhost:$port/contacts/person/3",
+            HttpMethod.GET,
+            {},
+            { assertEquals(404, it.statusCode.value()) })
+    }
+
+    /* ---- Private methods ---- */
+
+    private fun assertPerson(
+        response: ResponseEntity<Person>,
+        person: Person,
+        id: Int,
+        httpStatus: HttpStatus
+    ) {
+        val uri = URI.create("http://localhost:$port/contacts/person/$id")
+        assertEquals(httpStatus, response.statusCode)
+        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
+        val personUpdated = response.body
+        assertEquals(person.name, personUpdated?.name)
+        assertEquals(id, personUpdated?.id)
+        assertEquals(uri, personUpdated?.href)
     }
 
 }
